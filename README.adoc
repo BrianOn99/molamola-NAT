@@ -1,0 +1,21 @@
+= molamola-NAT
+
+_molamola-NAT do Network Address Translation which_ *SUCKS* :poop:
+
+WARNING: This is an CUHK CS assignment.  *NOT* for secure usage.
+
+== Credit
+Substantial code is copied from
+http://www.netfilter.org/projects/libnetfilter_queue/doxygen/index.html[libnetfilter_queue Documentation]
+
+== Build
+----
+make
+----
+
+== Coding Convention
+
+* Follow the Unix convention:
+** For function which DO something, return 0 in success, -1 on failure
+** For function which TEST something, such as `isodd(num)`, return 1 on success
+* Avoid unnecessary typedef
