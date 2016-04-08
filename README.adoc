@@ -4,9 +4,39 @@ _molamola-NAT do Network Address Translation which_ *SUCKS* :poop:
 
 WARNING: This is an CUHK CS assignment.  *NOT* for secure usage.
 
+This is not complete yet.
+
 == Credit
 Substantial code is copied from
 http://www.netfilter.org/projects/libnetfilter_queue/doxygen/index.html[libnetfilter_queue Documentation]
+
+== How-To
+Suppose you have one computer (call it A) connected to internet, while 2 other
+computers (B and C) connected to A.  So in order to allow B and C talk to the
+world, we connect them through A.  Usually this is done by router, otherwise by
+setting the iptables (the 'nat' table) in A.  Here do it also by iptables but
+through the NFQUEUE target.
+
+To set up the machines, on B and C:
+```
+sudo route add default gw 10.0.47.1
+```
+where 10.0.47.1 is ip of A.  On A, set the variable ${IP} to the ip of public
+interface, and ${LAN} ${MASK} to LAN ip and mask.  Then:
+```
+echo "1" >  /proc/sys/net/ipv4/ip_forward
+
+# clear all routes
+iptables -t nat -F
+iptables -t filter -F
+iptables -t mangle -F
+
+# add routes for trapping packets
+iptables -t filter -A FORWARD -j NFQUEUE --queue-num 0 -p tcp -s ${LAN}/${MASK}
+! -d ${IP} --dport 10000:12000
+iptables -t mangle -A PREROUTING -j NFQUEUE --queue-num 0 -p tcp -d ${IP}
+--dport 10000:12000
+```
 
 == Build
 ----
