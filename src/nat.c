@@ -31,9 +31,10 @@ int main(int argc, char **argv)
         }
 
         printf("binding this socket to queue '0'\n");
-        q_handle = nfq_create_queue(conn_handle,  0, &cb, NULL);
+        q_handle = nfq_create_queue(conn_handle,  0, &process_packet, NULL);
         if (!q_handle) {
-                fprintf(stderr, "error during nfq_create_queue()\n");
+                fprintf(stderr, "error during nfq_create_queue(),"
+                                "probably another application is running\n");
                 exit(1);
         }
 

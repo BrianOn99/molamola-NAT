@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <unistd.h>
+#include <stdint.h>
 #include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
 #include <linux/netfilter.h>		/* for NF_ACCEPT */
 #include <libnetfilter_queue/libnetfilter_queue.h>
 
@@ -12,6 +15,8 @@ void processPacketData (char *data, int size) {
         fclose (outFile);
 }
 
+
+#if 0  /* sample code */
 /* returns packet id */
 static u_int32_t print_pkt (struct nfq_data *tb)
 {
@@ -67,11 +72,33 @@ static u_int32_t print_pkt (struct nfq_data *tb)
 
         return id;
 }
+#endif
 
-int cb(struct nfq_q_handle *q_handle, struct nfgenmsg *nfmsg,
-                struct nfq_data *nfa, void *data)
+/*
+ * Copied from doxygen documentation:
+ * q_handle: the queue handle returned by nfq_create_queue
+ * nfmsg: message objetc that contains the packet (I think it is wrong)
+ * nfad: Netlink packet data handle
+ * data: he value passed to the data parameter of nfq_create_queue
+ */
+int process_packet(struct nfq_q_handle *q_handle, struct nfgenmsg *nfmsg,
+                   struct nfq_data *nfad, void *data)
 {
-        u_int32_t id = print_pkt(nfa);
-        printf("entering callback\n");
+        char *payload;
+        int payload_len = nfq_get_payload(nfad, &payload);
+        if (payload_len == -1) {
+                fprintf(stderr, "Error: cannot get payload\n");
+                return -1;
+        }
+
+        struct iphdr *iph = (struct iphdr*)payload;
+
+        if (iph->protocol != IPPROTO_TCP) {
+                fprintf(stderr, "Error: non-TCP received. "
+                                "iptabes is not set correctly?\nk");
+                return -1;
+        }
+
+        uint32_t id = ntohl(nfq_get_msg_packet_hdr(nfad)->packet_id);
         return nfq_set_verdict(q_handle, id, NF_ACCEPT, 0, NULL);
 }

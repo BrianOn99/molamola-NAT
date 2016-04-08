@@ -1,2 +1,3 @@
 *.o
 nat
+sample_code/*
