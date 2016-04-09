@@ -1,11 +1,12 @@
 #include <stdio.h>
 #include <unistd.h>
-#include <stdint.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <linux/netfilter.h>		/* for NF_ACCEPT */
 #include <libnetfilter_queue/libnetfilter_queue.h>
+
+int pub_interface_index = 0;
 
 struct ip_port {
         uint32_t ip;
@@ -20,6 +21,8 @@ static void _debug_ip_port(struct ip_port *s)
         puts(inet_ntoa((struct in_addr){s->ip}));
         printf("port: %d\n", ntohs(s->port));
 }
+#else
+static void _debug_ip_port(struct ip_port *s) {}
 #endif
 
 #if 0  /* sample code */
@@ -97,6 +100,11 @@ static void extract_source(struct iphdr *iph, struct ip_port *save_to)
         save_to->port = tcph->source;
 }
 
+static int come_from_outside(struct nfq_data *nfad)
+{
+        return nfq_get_indev(nfad) == pub_interface_index;
+}
+
 /*
  * Copied from doxygen documentation:
  * q_handle: the queue handle returned by nfq_create_queue
@@ -124,11 +132,14 @@ int process_packet(struct nfq_q_handle *q_handle, struct nfgenmsg *nfmsg,
                 return -1;
         }
         
-        struct ip_port my_ip_port;
-        extract_source(iph, &my_ip_port);
-#ifdef _DEBUG
-        _debug_ip_port(&my_ip_port);
-#endif
+        if (!come_from_outside(nfad)) {
+                puts("get outbound packet");
+                struct ip_port my_ip_port;
+                extract_source(iph, &my_ip_port);
+                _debug_ip_port(&my_ip_port);
+        } else {
+                puts("get inbound packet");
+        }
 
         return nfq_set_verdict(q_handle, id, NF_ACCEPT, payload_len, NULL);
 }

@@ -1,10 +1,69 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <ifaddrs.h>
 #include <libnetfilter_queue/libnetfilter_queue.h>
 #include "process_packet.h"
 
+static void usage()
+{
+        puts("Usage:");
+        puts("./nat <public ip> <internal ip> <subnet mask>");
+}
+
+static int get_interface_index(char *ip_str)
+{
+        struct in_addr public_addr;
+        unsigned int result = -1;
+        if (!inet_aton(ip_str, &public_addr)) {
+                perror("inet_aton on pulic ip");
+                usage();
+                exit(1);
+        }
+
+        struct ifaddrs *ifaddrs, *ifa;
+	if (getifaddrs(&ifaddrs) < 0)
+		return -1;
+	for (ifa = ifaddrs; ifa != NULL; ifa = ifa->ifa_next) {
+		if (!ifa->ifa_addr) continue;
+                struct sockaddr_in *addr = (void*)(ifa->ifa_addr);
+                if (addr->sin_addr.s_addr == public_addr.s_addr) {
+                        result = if_nametoindex(ifa->ifa_name);
+                        break;
+                }
+	}
+	freeifaddrs(ifaddrs);
+        return result;
+}
+
 int main(int argc, char **argv)
 {
+        if (argc < 2) {
+                usage();
+                exit(1);
+        }
+
+        pub_interface_index = get_interface_index(argv[1]);
+        if (pub_interface_index == -1) {
+                fprintf(stderr, "Some problem with given public ip\n");
+                exit(1);
+        }
+        printf("using interface index %d as to go out\n", pub_interface_index);
+
+#if 0 /* some code suggested by tutorial notes */
+        struct in_addr local_addr;
+        if (!inet_aton(argv[2], &local_addr)) {
+                perror("inet_aton");
+                usage();
+                exit(1);
+        }
+        int mask_int = atoi(argv[3]);
+        local_mask = 0xffffffff << (32 - mask_int);
+        local_network = local_addr.s_addr && local_mask;
+#endif
+
         struct nfq_handle *conn_handle;
         struct nfq_q_handle *q_handle;
         int fd;
@@ -47,7 +106,6 @@ int main(int argc, char **argv)
         fd = nfq_fd(conn_handle);
 
         while ((rv = recv(fd, buf, sizeof(buf), 0)) && rv >= 0) {
-                printf("pkt received\n");
                 nfq_handle_packet(conn_handle, buf, rv);
         }
 
