@@ -7,6 +7,22 @@
 #include <linux/netfilter.h>		/* for NF_ACCEPT */
 #include <libnetfilter_queue/libnetfilter_queue.h>
 
+struct ip_port {
+        uint32_t ip;
+        uint16_t port;
+};
+
+#ifdef _DEBUG
+#include <arpa/inet.h>
+static void _debug_ip_port(struct ip_port *s)
+{
+        printf("ip: ");
+        puts(inet_ntoa((struct in_addr){s->ip}));
+        printf("port: %d\n", ntohs(s->port));
+}
+#endif
+
+#if 0  /* sample code */
 void processPacketData (char *data, int size) {
         FILE *outFile;
 
@@ -15,8 +31,6 @@ void processPacketData (char *data, int size) {
         fclose (outFile);
 }
 
-
-#if 0  /* sample code */
 /* returns packet id */
 static u_int32_t print_pkt (struct nfq_data *tb)
 {
@@ -74,6 +88,15 @@ static u_int32_t print_pkt (struct nfq_data *tb)
 }
 #endif
 
+static void extract_source(struct iphdr *iph, struct ip_port *save_to)
+{
+        save_to->ip = iph->saddr;
+        /* go to the tcp header */
+        struct tcphdr * tcph = \
+                (struct tcphdr *) (((char*) iph) + (iph->ihl << 2));
+        save_to->port = tcph->source;
+}
+
 /*
  * Copied from doxygen documentation:
  * q_handle: the queue handle returned by nfq_create_queue
@@ -84,6 +107,7 @@ static u_int32_t print_pkt (struct nfq_data *tb)
 int process_packet(struct nfq_q_handle *q_handle, struct nfgenmsg *nfmsg,
                    struct nfq_data *nfad, void *data)
 {
+        uint32_t id = ntohl(nfq_get_msg_packet_hdr(nfad)->packet_id);
         char *payload;
         int payload_len = nfq_get_payload(nfad, &payload);
         if (payload_len == -1) {
@@ -96,9 +120,15 @@ int process_packet(struct nfq_q_handle *q_handle, struct nfgenmsg *nfmsg,
         if (iph->protocol != IPPROTO_TCP) {
                 fprintf(stderr, "Error: non-TCP received. "
                                 "iptabes is not set correctly?\nk");
+                nfq_set_verdict(q_handle, id, NF_DROP, 0, NULL);
                 return -1;
         }
+        
+        struct ip_port my_ip_port;
+        extract_source(iph, &my_ip_port);
+#ifdef _DEBUG
+        _debug_ip_port(&my_ip_port);
+#endif
 
-        uint32_t id = ntohl(nfq_get_msg_packet_hdr(nfad)->packet_id);
-        return nfq_set_verdict(q_handle, id, NF_ACCEPT, 0, NULL);
+        return nfq_set_verdict(q_handle, id, NF_ACCEPT, payload_len, NULL);
 }
