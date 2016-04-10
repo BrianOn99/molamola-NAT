@@ -13,23 +13,16 @@ static void usage()
         puts("./nat <public ip> <internal ip> <subnet mask>");
 }
 
-static int get_interface_index(char *ip_str)
+static int get_interface_index(struct in_addr *target_addr)
 {
-        struct in_addr public_addr;
-        unsigned int result = -1;
-        if (!inet_aton(ip_str, &public_addr)) {
-                perror("inet_aton on pulic ip");
-                usage();
-                exit(1);
-        }
-
         struct ifaddrs *ifaddrs, *ifa;
+        int result = -1;
 	if (getifaddrs(&ifaddrs) < 0)
 		return -1;
 	for (ifa = ifaddrs; ifa != NULL; ifa = ifa->ifa_next) {
 		if (!ifa->ifa_addr) continue;
                 struct sockaddr_in *addr = (void*)(ifa->ifa_addr);
-                if (addr->sin_addr.s_addr == public_addr.s_addr) {
+                if (addr->sin_addr.s_addr == target_addr->s_addr) {
                         result = if_nametoindex(ifa->ifa_name);
                         break;
                 }
@@ -45,12 +38,21 @@ int main(int argc, char **argv)
                 exit(1);
         }
 
-        pub_interface_index = get_interface_index(argv[1]);
+        char *pub_ip_str = argv[1];
+        struct in_addr public_addr;
+        if (!inet_aton(pub_ip_str, &public_addr)) {
+                perror("inet_aton on pulic ip");
+                usage();
+                exit(1);
+        }
+        pub_interface_ip = public_addr.s_addr;
+
+        pub_interface_index = get_interface_index(&public_addr);
         if (pub_interface_index == -1) {
                 fprintf(stderr, "Some problem with given public ip\n");
                 exit(1);
         }
-        printf("using interface index %d as to go out\n", pub_interface_index);
+        printf("using interface index %d to go out\n", pub_interface_index);
 
 #if 0 /* some code suggested by tutorial notes */
         struct in_addr local_addr;

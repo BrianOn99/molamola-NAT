@@ -5,24 +5,24 @@
 #include <netinet/tcp.h>
 #include <linux/netfilter.h>		/* for NF_ACCEPT */
 #include <libnetfilter_queue/libnetfilter_queue.h>
+#include "ip_port.h"
+#include "table.h"
+#include "checksum.h"
 
 int pub_interface_index = 0;
-
-struct ip_port {
-        uint32_t ip;
-        uint16_t port;
-};
+uint32_t pub_interface_ip = 0;
 
 #ifdef _DEBUG
 #include <arpa/inet.h>
-static void _debug_ip_port(struct ip_port *s)
+static void _debug_ip_port(char *msg, struct ip_port *s)
 {
+        puts(msg);
         printf("ip: ");
         puts(inet_ntoa((struct in_addr){s->ip}));
         printf("port: %d\n", ntohs(s->port));
 }
 #else
-static void _debug_ip_port(struct ip_port *s) {}
+static void _debug_ip_port(char *msg, struct ip_port *s) {}
 #endif
 
 #if 0  /* sample code */
@@ -91,18 +91,48 @@ static u_int32_t print_pkt (struct nfq_data *tb)
 }
 #endif
 
-static void extract_source(struct iphdr *iph, struct ip_port *save_to)
+static struct tcphdr * locate_tcp(struct iphdr *iph)
 {
-        save_to->ip = iph->saddr;
-        /* go to the tcp header */
-        struct tcphdr * tcph = \
-                (struct tcphdr *) (((char*) iph) + (iph->ihl << 2));
-        save_to->port = tcph->source;
+        return (struct tcphdr *) (((char*) iph) + (iph->ihl << 2));
 }
 
 static int come_from_outside(struct nfq_data *nfad)
 {
         return nfq_get_indev(nfad) == pub_interface_index;
+}
+
+/*
+ * handle the case packet is outbound but no table entry yet.
+ * Return new port if no error
+ */
+static int
+outbound_new_getport(struct tcphdr *tcph, struct ip_port *my_ip_port)
+{
+        if (tcph->syn) {
+                puts("get new connection");
+                return table_insert(my_ip_port);
+        } else {
+                puts("syn not set");
+                return -1;
+        }
+}
+
+static void
+transform_to_out(struct iphdr *iph, struct tcphdr *tcph, uint16_t trans_port)
+{
+        iph->saddr = pub_interface_ip;
+        tcph->source = trans_port;
+        iph->check = ip_checksum((unsigned char *)iph);
+        tcph->check = tcp_checksum((unsigned char *)iph);
+}
+
+static void
+transform_to_in(struct iphdr *iph, struct tcphdr *tcph, struct ip_port *orig_ip_port)
+{
+        iph->daddr = orig_ip_port->ip;
+        tcph->dest = orig_ip_port->port;
+        iph->check = ip_checksum((unsigned char *)iph);
+        tcph->check = tcp_checksum((unsigned char *)iph);
 }
 
 /*
@@ -116,7 +146,7 @@ int process_packet(struct nfq_q_handle *q_handle, struct nfgenmsg *nfmsg,
                    struct nfq_data *nfad, void *data)
 {
         uint32_t id = ntohl(nfq_get_msg_packet_hdr(nfad)->packet_id);
-        char *payload;
+        unsigned char *payload;
         int payload_len = nfq_get_payload(nfad, &payload);
         if (payload_len == -1) {
                 fprintf(stderr, "Error: cannot get payload\n");
@@ -128,18 +158,39 @@ int process_packet(struct nfq_q_handle *q_handle, struct nfgenmsg *nfmsg,
         if (iph->protocol != IPPROTO_TCP) {
                 fprintf(stderr, "Error: non-TCP received. "
                                 "iptabes is not set correctly?\nk");
-                nfq_set_verdict(q_handle, id, NF_DROP, 0, NULL);
-                return -1;
+                goto drop_packet;
         }
         
+        struct tcphdr* tcph = locate_tcp(iph);
         if (!come_from_outside(nfad)) {
                 puts("get outbound packet");
-                struct ip_port my_ip_port;
-                extract_source(iph, &my_ip_port);
-                _debug_ip_port(&my_ip_port);
+                struct ip_port my_ip_port = {
+                        iph->saddr,
+                        tcph->source
+                };
+                _debug_ip_port("Outbound:", &my_ip_port);
+                int trans_port = table_orig2trans(&my_ip_port);
+                if (trans_port == -1) {  /* not found */
+                        trans_port = outbound_new_getport(tcph, &my_ip_port);
+                        if (trans_port == -1)
+                                goto drop_packet;
+                } else {
+                        puts("found entry");
+                }
+                transform_to_out(iph, tcph, trans_port);
         } else {
                 puts("get inbound packet");
+                struct ip_port *orig_ip_port = table_trans2orig(&(tcph->dest));
+                if (orig_ip_port == NULL)
+                        goto drop_packet;
+                transform_to_in(iph, tcph, orig_ip_port);
         }
 
-        return nfq_set_verdict(q_handle, id, NF_ACCEPT, payload_len, NULL);
+        int ret = nfq_set_verdict(q_handle, id, NF_ACCEPT, payload_len, payload);
+        printf("accept packet: ret %d\n", ret);
+        return ret;
+
+drop_packet:
+        puts("drop packet");
+        return nfq_set_verdict(q_handle, id, NF_DROP, 0, NULL);
 }
