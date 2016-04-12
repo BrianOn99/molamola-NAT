@@ -4,6 +4,7 @@ int table_insert(struct ip_port *my_ip_port);
 int table_find_rev(uint16_t *port);
 int table_find(struct ip_port *my_ip_port);
 void table_remove(int index);
+void table_monitor_FIN(unsigned int index, struct tcphdr *tcph, int is_outbound);
 #ifndef NDEBUG
 void table_print(FILE *output_dev);
 #endif

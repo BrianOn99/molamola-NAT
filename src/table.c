@@ -5,14 +5,20 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <assert.h>
+#include <netinet/tcp.h>
 #include "ip_port.h"
 #define MIN_OUT_PORT 10000
 #define MAX_OUT_PORT 12001  /* exclusive */
 #define TABLE_SIZE (MAX_OUT_PORT-MIN_OUT_PORT)
 
+enum fin_state { FIN_NOT = 0, FIN_ASK_1, FIN_ACK_1, FIN_ASK_2 };
+
 struct table_entry {
         struct ip_port orig;
         uint16_t transfrom_port;
+        enum fin_state fin_s;
+        uint32_t fin_ack;
+        char fin_init_by_us;
 };
 static struct table_entry table[TABLE_SIZE];
 static unsigned int table_item_num = 0;
@@ -23,12 +29,13 @@ static char consumed_port[MAX_OUT_PORT-MIN_OUT_PORT];
 void table_print(FILE *output_dev)
 {
         fprintf(output_dev, "=====Translation Table=====\n");
-        fprintf(output_dev, "%-20s | %-10s\n", "from", "to");
+        fprintf(output_dev, "%-20s | %-10s | %5s\n", "from", "to", "state");
         for (int i=0; i < table_item_num; i++) {
-                fprintf(output_dev, "%-11s :%-7d | %-10d\n",
+                fprintf(output_dev, "%-11s :%-7d | %-10d | %1d\n",
                         inet_ntoa((struct in_addr){table[i].orig.ip}),
                         ntohs(table[i].orig.port),
-                        ntohs(table[i].transfrom_port));
+                        ntohs(table[i].transfrom_port),
+                        table[i].fin_s);
         }
         fprintf(output_dev, "\n");
 }
@@ -59,6 +66,7 @@ void table_remove(int index)
         /* remove the item by overwriting */
         if (table_item_num > 0)
                 memcpy(&table[table_item_num], &table[index], sizeof(table[0]));
+        memset(&table[table_item_num], '\0', sizeof(table[0]);
         table_item_num--;
 }
 
@@ -115,4 +123,45 @@ int table_insert(struct ip_port *my_ip_port)
         assert(next->transfrom_port != -1);
         table_item_num++;
         return next->transfrom_port;
+}
+
+void table_monitor_FIN(unsigned int index, struct tcphdr *tcph, int is_outbound)
+{
+        struct table_entry *entry = &table[index];
+        switch (entry->fin_s) {
+        case FIN_NOT:
+                if (tcph->fin) {
+                        entry->fin_init_by_us = is_outbound;
+                        entry->fin_ack = tcph->ack;
+                        entry->fin_s= FIN_ASK_1;
+                        //puts("goto A");
+                }
+                break;
+        case FIN_ASK_1:
+                if (entry->fin_init_by_us == is_outbound)
+                        break;
+                if (!(entry->fin_ack <= tcph->seq))
+                        break;
+                entry->fin_s= FIN_ACK_1;
+                //puts("goto B");
+                /* fall throygh */
+        case FIN_ACK_1:
+                if (entry->fin_init_by_us == is_outbound)
+                        break;
+                if (tcph->fin) {
+                        entry->fin_ack = tcph->ack;
+                        entry->fin_s= FIN_ASK_2;
+                        //puts("goto C");
+                }
+                break;
+        case FIN_ASK_2:
+                if (entry->fin_init_by_us != is_outbound)
+                        break;
+                if (entry->fin_ack <= tcph->seq) {
+                        table_remove(index);
+                        entry->fin_s= FIN_NOT;
+                        //puts("goto FINISHED");
+                }
+                break;
+        }
 }

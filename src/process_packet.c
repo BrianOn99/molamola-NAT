@@ -101,13 +101,15 @@ int process_packet(struct nfq_q_handle *q_handle, struct nfgenmsg *nfmsg,
         
         struct tcphdr* tcph = locate_tcp(iph);
         int outbound = !come_from_outside(nfad);
-        struct ip_port my_ip_port;  /* only for outbound packet */
+        int item_index;
         if (outbound) {
                 puts("get outbound packet");
-                my_ip_port.ip = iph->saddr;
-                my_ip_port.port = tcph->source;
+                struct ip_port my_ip_port = {
+                        iph->saddr,
+                        tcph->source
+                };
                 _debug_ip_port("Outbound:", &my_ip_port);
-
+                item_index = table_find(&my_ip_port);
                 int trans_port = table_orig2trans(&my_ip_port);
                 if (trans_port == -1) {  /* not found */
                         trans_port = outbound_new_getport(tcph, &my_ip_port);
@@ -122,14 +124,14 @@ int process_packet(struct nfq_q_handle *q_handle, struct nfgenmsg *nfmsg,
                 struct ip_port *orig_ip_port = table_trans2orig(&(tcph->dest));
                 if (orig_ip_port == NULL)
                         goto drop_packet;
+                item_index = table_find_rev(&(tcph->dest));
                 transform_to_in(iph, tcph, orig_ip_port);
         }
         if (tcph->rst) {
                 printf("connection RST\n");
-                int item_index = outbound ? table_find_rev(&(tcph->dest)) :
-                                            table_find(&my_ip_port);
                 table_remove(item_index);
         }
+        table_monitor_FIN(item_index, tcph, outbound);
         set_checksum(iph, tcph);
 
         int ret = nfq_set_verdict(q_handle, id, NF_ACCEPT, payload_len, payload);
