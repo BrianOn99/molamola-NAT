@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <unistd.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
@@ -9,6 +8,9 @@
 #include "table.h"
 #include "checksum.h"
 
+/*
+ * global variables to be set else where
+ */
 int pub_interface_index = 0;
 uint32_t pub_interface_ip = 0;
 
@@ -23,72 +25,6 @@ static void _debug_ip_port(char *msg, struct ip_port *s)
 }
 #else
 static void _debug_ip_port(char *msg, struct ip_port *s) {}
-#endif
-
-#if 0  /* sample code */
-void processPacketData (char *data, int size) {
-        FILE *outFile;
-
-        outFile = fopen ("/tmp/packetData.txt", "w");
-        fwrite (data, size, 1, outFile);
-        fclose (outFile);
-}
-
-/* returns packet id */
-static u_int32_t print_pkt (struct nfq_data *tb)
-{
-        int id = 0;
-        struct nfqnl_msg_packet_hdr *ph;
-        struct nfqnl_msg_packet_hw *hwph;
-        u_int32_t mark,ifi; 
-        int ret;
-        char *data;
-
-        ph = nfq_get_msg_packet_hdr(tb);
-        if (ph) {
-                id = ntohl(ph->packet_id);
-                printf("hw_protocol=0x%04x hook=%u id=%u ",
-                       ntohs(ph->hw_protocol), ph->hook, id);
-        }
-
-        hwph = nfq_get_packet_hw(tb);
-        if (hwph) {
-                int i, hlen = ntohs(hwph->hw_addrlen);
-
-                printf("hw_src_addr=");
-                for (i = 0; i < hlen-1; i++)
-                        printf("%02x:", hwph->hw_addr[i]);
-                printf("%02x ", hwph->hw_addr[hlen-1]);
-        }
-
-        mark = nfq_get_nfmark(tb);
-        if (mark)
-                printf("mark=%u ", mark);
-
-        ifi = nfq_get_indev(tb);
-        if (ifi)
-                printf("indev=%u ", ifi);
-
-        ifi = nfq_get_outdev(tb);
-        if (ifi)
-                printf("outdev=%u ", ifi);
-        ifi = nfq_get_physindev(tb);
-        if (ifi)
-                printf("physindev=%u ", ifi);
-
-        ifi = nfq_get_physoutdev(tb);
-        if (ifi)
-                printf("physoutdev=%u ", ifi);
-
-        ret = nfq_get_payload(tb, &data);
-        if (ret >= 0) {
-                printf("payload_len=%d ", ret);
-                processPacketData (data, ret);
-        }
-        fputc('\n', stdout);
-
-        return id;
-}
 #endif
 
 static struct tcphdr * locate_tcp(struct iphdr *iph)
