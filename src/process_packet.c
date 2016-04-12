@@ -14,7 +14,7 @@
 int pub_interface_index = 0;
 uint32_t pub_interface_ip = 0;
 
-#ifdef _DEBUG
+#ifndef NDEBUG
 #include <arpa/inet.h>
 static void _debug_ip_port(char *msg, struct ip_port *s)
 {
@@ -124,6 +124,9 @@ int process_packet(struct nfq_q_handle *q_handle, struct nfgenmsg *nfmsg,
 
         int ret = nfq_set_verdict(q_handle, id, NF_ACCEPT, payload_len, payload);
         printf("accept packet: ret %d\n", ret);
+#ifndef NDEBUG
+        table_print(stdout);
+#endif
         return ret;
 
 drop_packet:

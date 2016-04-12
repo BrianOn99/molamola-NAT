@@ -2,7 +2,8 @@
 
 _molamola-NAT do Network Address Translation which_ *SUCKS* :poop:
 
-WARNING: This is an CUHK CS assignment.  *NOT* for secure usage.
+WARNING: This is an CUHK CS assignment.  *NOT* for secure usage.  It can only
+handle TCP traffic.  Efficiency is not a concern.
 
 This is not complete yet.
 
@@ -41,6 +42,10 @@ iptables -t mangle -A PREROUTING -j NFQUEUE --queue-num 0 -p tcp -d ${IP}
 == Build
 ----
 make
+----
+or
+----
+make debug
 ----
 
 == Coding Convention

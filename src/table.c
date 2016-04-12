@@ -19,6 +19,21 @@ static unsigned int table_item_num = 0;
 /* record which port is consumed.  First item correspond to MIN_OUT_PORT */
 static char consumed_port[MAX_OUT_PORT-MIN_OUT_PORT];
 
+#ifndef NDEBUG
+void table_print(FILE *output_dev)
+{
+        fprintf(output_dev, "=====Translation Table=====\n");
+        fprintf(output_dev, "%-20s | %-10s\n", "from", "to");
+        for (int i=0; i < table_item_num; i++) {
+                fprintf(output_dev, "%-11s :%-7d | %-10d\n",
+                        inet_ntoa((struct in_addr){table[i].orig.ip}),
+                        ntohs(table[i].orig.port),
+                        ntohs(table[i].transfrom_port));
+        }
+        fprintf(output_dev, "\n");
+}
+#endif
+
 static int table_find(struct ip_port *my_ip_port)
 {
         for (int i=0; i < table_item_num; i++) {
