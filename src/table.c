@@ -34,7 +34,7 @@ void table_print(FILE *output_dev)
 }
 #endif
 
-static int table_find(struct ip_port *my_ip_port)
+int table_find(struct ip_port *my_ip_port)
 {
         for (int i=0; i < table_item_num; i++) {
                 if (memcmp(my_ip_port, &(table[i].orig), sizeof(*my_ip_port)) == 0)
@@ -43,13 +43,23 @@ static int table_find(struct ip_port *my_ip_port)
         return -1;
 }
 
-static int table_find_rev(uint16_t *port)
+int table_find_rev(uint16_t *port)
 {
         for (int i=0; i < table_item_num; i++) {
                 if (memcmp(port, &(table[i].transfrom_port), sizeof(*port)) == 0)
                         return i;
         }
         return -1;
+}
+
+void table_remove(int index)
+{
+        uint16_t using_port = ntohs(table[index].transfrom_port);
+        consumed_port[using_port - MIN_OUT_PORT] = 0;
+        /* remove the item by overwriting */
+        if (table_item_num > 0)
+                memcpy(&table[table_item_num], &table[index], sizeof(table[0]));
+        table_item_num--;
 }
 
 /*

@@ -58,8 +58,6 @@ transform_to_out(struct iphdr *iph, struct tcphdr *tcph, uint16_t trans_port)
 {
         iph->saddr = pub_interface_ip;
         tcph->source = trans_port;
-        iph->check = ip_checksum((unsigned char *)iph);
-        tcph->check = tcp_checksum((unsigned char *)iph);
 }
 
 static void
@@ -67,6 +65,10 @@ transform_to_in(struct iphdr *iph, struct tcphdr *tcph, struct ip_port *orig_ip_
 {
         iph->daddr = orig_ip_port->ip;
         tcph->dest = orig_ip_port->port;
+}
+
+static void set_checksum(struct iphdr *iph, struct tcphdr *tcph)
+{
         iph->check = ip_checksum((unsigned char *)iph);
         tcph->check = tcp_checksum((unsigned char *)iph);
 }
@@ -98,13 +100,14 @@ int process_packet(struct nfq_q_handle *q_handle, struct nfgenmsg *nfmsg,
         }
         
         struct tcphdr* tcph = locate_tcp(iph);
-        if (!come_from_outside(nfad)) {
+        int outbound = !come_from_outside(nfad);
+        struct ip_port my_ip_port;  /* only for outbound packet */
+        if (outbound) {
                 puts("get outbound packet");
-                struct ip_port my_ip_port = {
-                        iph->saddr,
-                        tcph->source
-                };
+                my_ip_port.ip = iph->saddr;
+                my_ip_port.port = tcph->source;
                 _debug_ip_port("Outbound:", &my_ip_port);
+
                 int trans_port = table_orig2trans(&my_ip_port);
                 if (trans_port == -1) {  /* not found */
                         trans_port = outbound_new_getport(tcph, &my_ip_port);
@@ -121,6 +124,13 @@ int process_packet(struct nfq_q_handle *q_handle, struct nfgenmsg *nfmsg,
                         goto drop_packet;
                 transform_to_in(iph, tcph, orig_ip_port);
         }
+        if (tcph->rst) {
+                printf("connection RST\n");
+                int item_index = outbound ? table_find_rev(&(tcph->dest)) :
+                                            table_find(&my_ip_port);
+                table_remove(item_index);
+        }
+        set_checksum(iph, tcph);
 
         int ret = nfq_set_verdict(q_handle, id, NF_ACCEPT, payload_len, payload);
         printf("accept packet: ret %d\n", ret);
