@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include <assert.h>
 #include <netinet/tcp.h>
+#include <time.h>
 #include "ip_port.h"
 #define MIN_OUT_PORT 10000
 #define MAX_OUT_PORT 12001  /* exclusive */
@@ -19,7 +20,9 @@ struct table_entry {
         enum fin_state fin_s;
         uint32_t fin_ack;
         char fin_init_by_us;
+        time_t last_time;
 };
+
 static struct table_entry table[TABLE_SIZE];
 static unsigned int table_item_num = 0;
 /* record which port is consumed.  First item correspond to MIN_OUT_PORT */
@@ -29,13 +32,14 @@ static char consumed_port[MAX_OUT_PORT-MIN_OUT_PORT];
 void table_print(FILE *output_dev)
 {
         fprintf(output_dev, "=====Translation Table=====\n");
-        fprintf(output_dev, "%-20s | %-10s | %5s\n", "from", "to", "state");
+        fprintf(output_dev, "%-20s | %-10s | %-5s | %-15s\n", "from", "to", "state", "last time");
         for (int i=0; i < table_item_num; i++) {
-                fprintf(output_dev, "%-11s :%-7d | %-10d | %1d\n",
+                fprintf(output_dev, "%-11s :%-7d | %-10d | %1d | %-15s\n",
                         inet_ntoa((struct in_addr){table[i].orig.ip}),
                         ntohs(table[i].orig.port),
                         ntohs(table[i].transfrom_port),
-                        table[i].fin_s);
+                        table[i].fin_s,
+                        ctime(&table[i].last_time));
         }
         fprintf(output_dev, "\n");
 }
@@ -64,34 +68,31 @@ void table_remove(int index)
         uint16_t using_port = ntohs(table[index].transfrom_port);
         consumed_port[using_port - MIN_OUT_PORT] = 0;
         /* remove the item by overwriting */
-        if (table_item_num > 0)
-                memcpy(&table[table_item_num], &table[index], sizeof(table[0]));
-        memset(&table[table_item_num], '\0', sizeof(table[0]);
+        if (table_item_num > 1) {
+                //printf("overwriting from %d to %d\n", table_item_num-1, index);
+                memcpy(&table[index], &table[table_item_num-1], sizeof(table[0]));
+        }
+        //printf("clearing index %d\n", table_item_num-1);
+        memset(&table[table_item_num-1], '\0', sizeof(table[0]));
         table_item_num--;
 }
 
 /*
  * get the transformed port
  */
-int table_orig2trans(struct ip_port *my_ip_port)
+int table_trans(int i)
 {
-        int i = table_find(my_ip_port);
-        if (i == -1)
-                return -1;
-        else
-                return table[i].transfrom_port;
+        assert(i >= 0);
+        return table[i].transfrom_port;
 }
 
 /*
  * get the original ip and port
  */
-struct ip_port * table_trans2orig(uint16_t *port)
+struct ip_port * table_orig(int i)
 {
-        int i = table_find_rev(port);
-        if (i == -1)
-                return NULL;
-        else
-                return &(table[i].orig);
+        assert(i >= 0);
+        return &(table[i].orig);
 }
 
 /*
@@ -120,12 +121,21 @@ int table_insert(struct ip_port *my_ip_port)
         struct table_entry *next = &table[table_item_num];
         next->orig = *my_ip_port;
         next->transfrom_port = take_next_port();
+        next->last_time = time(NULL);
         assert(next->transfrom_port != -1);
         table_item_num++;
         return next->transfrom_port;
 }
 
-void table_monitor_FIN(unsigned int index, struct tcphdr *tcph, int is_outbound)
+void table_update_time(unsigned int index)
+{
+        table[index].last_time = time(NULL);
+}
+
+/*
+ * check FIN flag.  return 1 if removed from table else 0
+ */
+int table_monitor_FIN(unsigned int index, struct tcphdr *tcph, int is_outbound)
 {
         struct table_entry *entry = &table[index];
         switch (entry->fin_s) {
@@ -136,7 +146,7 @@ void table_monitor_FIN(unsigned int index, struct tcphdr *tcph, int is_outbound)
                         entry->fin_s= FIN_ASK_1;
                         //puts("goto A");
                 }
-                break;
+                return 0;
         case FIN_ASK_1:
                 if (entry->fin_init_by_us == is_outbound)
                         break;
@@ -153,7 +163,7 @@ void table_monitor_FIN(unsigned int index, struct tcphdr *tcph, int is_outbound)
                         entry->fin_s= FIN_ASK_2;
                         //puts("goto C");
                 }
-                break;
+                return 0;
         case FIN_ASK_2:
                 if (entry->fin_init_by_us != is_outbound)
                         break;
@@ -162,6 +172,10 @@ void table_monitor_FIN(unsigned int index, struct tcphdr *tcph, int is_outbound)
                         entry->fin_s= FIN_NOT;
                         //puts("goto FINISHED");
                 }
-                break;
+                return 1;
+        default:
+                printf("Error: unhandled state %d.  Should not reach here\n",
+                       entry->fin_s);
         }
+        return 0;
 }

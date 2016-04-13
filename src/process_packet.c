@@ -110,28 +110,31 @@ int process_packet(struct nfq_q_handle *q_handle, struct nfgenmsg *nfmsg,
                 };
                 _debug_ip_port("Outbound:", &my_ip_port);
                 item_index = table_find(&my_ip_port);
-                int trans_port = table_orig2trans(&my_ip_port);
-                if (trans_port == -1) {  /* not found */
+                int trans_port;
+                if (item_index == -1) {  /* not found */
                         trans_port = outbound_new_getport(tcph, &my_ip_port);
                         if (trans_port == -1)
                                 goto drop_packet;
                 } else {
-                        puts("found entry");
+                        trans_port = table_trans(item_index);
                 }
                 transform_to_out(iph, tcph, trans_port);
         } else {
                 puts("get inbound packet");
-                struct ip_port *orig_ip_port = table_trans2orig(&(tcph->dest));
-                if (orig_ip_port == NULL)
-                        goto drop_packet;
                 item_index = table_find_rev(&(tcph->dest));
+                if (item_index == -1)
+                        goto drop_packet;
+                struct ip_port *orig_ip_port = table_orig(item_index);
                 transform_to_in(iph, tcph, orig_ip_port);
         }
         if (tcph->rst) {
                 printf("connection RST\n");
                 table_remove(item_index);
+        } else if (item_index != -1) {  /* not interested in new connection */
+                int removed = table_monitor_FIN(item_index, tcph, outbound);
+                if (!removed)
+                        table_update_time(item_index);
         }
-        table_monitor_FIN(item_index, tcph, outbound);
         set_checksum(iph, tcph);
 
         int ret = nfq_set_verdict(q_handle, id, NF_ACCEPT, payload_len, payload);
